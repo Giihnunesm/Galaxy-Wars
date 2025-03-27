@@ -1,91 +1,70 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-import pygame
+import random
+import sys
 
+import pygame
+from pygame import Surface, Rect
+from pygame.font import Font
+
+from code.Const import C_WHITE, WIN_HEIGHT, MENU_OPTION, EVENT_ENEMY, SPAWN_TIME, C_GREEN, C_CYAN
+from code.Enemy import Enemy
 from code.Entity import Entity
 from code.EntityFactory import EntityFactory
-from code.Const import WIN_WIDTH
+from code.EntityMediator import EntityMediator
+from code.Player import Player
 
 
 class Level:
 
-    def __init__(self, window, name, game_mode, level_number=1, is_menu=False):
+    def __init__(self, window, name, game_mode):
         self.window = window
         self.name = name
         self.game_mode = game_mode  # modo de jogo
-        self.is_menu = is_menu  # Flag para verificar se é o menu
-        self.level_number = level_number # Número do nível
         self.entity_list: list[Entity] = []
-        self.scroll_x = 0 # Variável para controlar o scroll horizontal
-
-        # Carregar o fundo dependendo se é menu ou nível de jogo
-        if self.is_menu:
-            self.entity_list.extend(EntityFactory.get_entity('MenuBg')) # Carrega o fundo do menu
-        else:
-            if self.level_number == 1:
-                self.entity_list.extend(EntityFactory.get_entity('Level1Bg'))
-            elif self.level_number == 2:
-                self.entity_list.extend(EntityFactory.get_entity('Level2Bg'))
-            # Adicione mais níveis aqui se necessário
-
-    def resize_background(self):
-        # Obtém o tamanho da janela
-        width, height = self.window.get_size()
-
-        # Só redimensionar se não for o menu
-        for entity in self.entity_list:
-            # Obtém o tamanho original da superfície da entidade
-            orig_width, orig_height = entity.surf.get_size()
-
-            # Calcula o fator de escala para manter a proporção da imagem
-            scale_factor = min(width / orig_width, height / orig_height)
-
-            # Calcula o novo tamanho mantendo a proporção
-            new_width = int(orig_width * scale_factor)
-            new_height = int(orig_height * scale_factor)
-
-            # Redimensiona a superfície da entidade mantendo a proporção
-            entity.surf = pygame.transform.scale(entity.surf, (new_width, new_height))
-
-            # Atualiza o retângulo da entidade
-            entity.rect = entity.surf.get_rect()
-
-            # Centraliza a entidade na janela (opcional, pode remover se usar scroll)
-            entity.rect.center = (width // 2, height // 2)
+        self.entity_list.extend(EntityFactory.get_entity('Level1Bg'))
+        self.entity_list.append(EntityFactory.get_entity('Player1'))
+        self.timeout = 20000
+        if game_mode in [MENU_OPTION[1], MENU_OPTION[2]]:
+            self.entity_list.append(EntityFactory.get_entity('Player2'))
+        pygame.time.set_timer(EVENT_ENEMY, SPAWN_TIME)
 
     def run(self):
-        # Redimensiona o fundo, se necessário
-        self.resize_background()
-
-        running = True
-        while running:
+        pygame.mixer.music.load(f'./asset/{self.name}.mp3')
+        pygame.mixer.music.play(-1)
+        clock = pygame.time.Clock()
+        while True:
+            clock.tick(60)
+            for ent in self.entity_list:
+                self.window.blit(source=ent.surf, dest=ent.rect)
+                ent.move()
+                if isinstance(ent, (Player, Enemy)):
+                    shoot = ent.shoot()
+                    if shoot is not None:
+                        self.entity_list.append(shoot)
+                if ent.name == 'Player1':
+                    self.level_text(14, f'Player1 - Health: {ent.health} | Score: {ent.score}', C_GREEN, (10, 20))
+                if ent.name == 'Player2':
+                    self.level_text(14, f'Player2 - Health: {ent.health} | Score: {ent.score}', C_CYAN, (10, 30))
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    pygame.quit()
+                    sys.exit()
+                if event.type == EVENT_ENEMY:
+                    choice = random.choice(('Enemy1', 'Enemy2'))
+                    self.entity_list.append(EntityFactory.get_entity(choice))
 
-            # Simulação de movimento do personagem (substitua pela lógica real)
-            keys = pygame.key.get_pressed()
-            player_speed = 1
-            if not self.is_menu and self.entity_list:
-                if keys[pygame.K_LEFT]:
-                    self.scroll_x += player_speed
-                if keys[pygame.K_RIGHT]:
-                    self.scroll_x -= player_speed
+            self.level_text(14, f'{self.name} - Timeout: {self.timeout / 1000 :.1f}s', C_WHITE, (10, 5))
+            self.level_text(14, f'fps: {clock.get_fps() :.0f}', C_WHITE, (10, WIN_HEIGHT - 35))
+            self.level_text(14, f'entidades: {len(self.entity_list)}', C_WHITE, (10, WIN_HEIGHT - 20))
+            pygame.display.flip()
+            # Collisions
+            EntityMediator.verify_collision(entity_list=self.entity_list)
+            EntityMediator.verify_health(entity_list=self.entity_list)
+        pass
 
-            # Limpa a tela antes de desenhar os elementos
-            self.window.fill((0, 0, 0))  # Preenche com preto ou outra cor
-
-            if not self.is_menu and self.entity_list:
-                for ent in self.entity_list:
-                    # Move o background
-                    ent.move(self.scroll_x)
-                    # Desenha a entidade na janela
-                    self.window.blit(source=ent.surf, dest=ent.rect)
-            elif self.is_menu:
-                for ent in self.entity_list:
-                    # Desenha a entidade na janela
-                    self.window.blit(source=ent.surf, dest=ent.rect)
-
-            pygame.display.flip()  # Atualiza a tela
-
-        pygame.quit() # Adicione esta linha para fechar o Pygame quando o loop terminar
+    def level_text(self, text_size: int, text: str, text_color: tuple, text_pos: tuple):
+        text_font: Font = pygame.font.SysFont(name="Lucida Sans Typewriter", size=text_size)
+        text_surf: Surface = text_font.render(text, True, text_color).convert_alpha()
+        text_rect: Rect = text_surf.get_rect(left=text_pos[0], top=text_pos[1])
+        self.window.blit(source=text_surf, dest=text_rect)
